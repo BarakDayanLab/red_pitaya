@@ -9,9 +9,10 @@ from matplotlib import pyplot as plt
 from pyrpl import Pyrpl
 import time
 import numpy as np
-import SCPIControl
+from asyncio import ensure_future
 
-class redpitaya:
+
+class RedPitaya:
     # decimation - he rate at which the memory is filled is the sampling rate (125 MHz) divided by the value of ‘decimation’.
     def __init__(self, gui=False):
         self.HOSTNAME = "rp-f0629e.local"
@@ -22,7 +23,9 @@ class redpitaya:
         self.r = self.p.rp
         self.s = self.r.scope
         self.s.trigger_delay = 0
-        self.s.threshold = 0
+        self.s.threshold = 0.1
+        self.s.duration = 0.001
+
 
     def acquire(self, decimation=1024.0, duration=0.001, trigger_source='ch2_positive_edge', input1 ='in1', input2 ='in2'):
         """
@@ -45,12 +48,46 @@ class redpitaya:
         return self.res, self.s.decimation
     # Data - two elements to be plotted
 
-    def plot(self, Data, Data_0_label,  Data_1_label ):
-        while not self.s.curve_ready(): pass
+    def acquire_2_traces(self, decimation=1024.0, duration=0.001, trigger_source='ch2_positive_edge', input1='in1', input2='in2'):
+        """
+        this function acquires two following traces with two following triggers into diffrent objects.
+        :param decimation: the decimation on sampling. decimation=1 is equivalent to 124 MHz of sampling.
+                 be aware that the minimal decimation would change as a function of the duration.
+        :param duration: the duration of the acquisition in [s]. for triggered signal make sure its as the duration between triggers.
+        :param trigger_source: the source for triggering the input signal acquired
+        :param input1: the input to channel 1 of the scope
+        :param input2: the input to channel 2 of the scope
+        :return:Inputs_first_res, Inputs_second_res - the first and second traces.
+        """
+        self.s.decimation = decimation
+        self.s.duration = duration
+        self.s.input1 = input1
+        self.s.input2 = input2
+        self.s.trigger_source = trigger_source
+        self.res = self.s.curve_async()
+        # self.second_res = self.s.curve_async()
+
+    async def my_acquisition_routine(self,n):
+        for i in range(n):
+            print("acquiring scope")
+            # fut = ensure_future(self.s.single_async())
+            fut2 = ensure_future(self.s.single_async())
+            # both acquisitions are carried out simultaneously
+            self.data1 = await fut2
+            # data2 = await fut2
+            print("loop %i" % i, self.data1)
+
+    def get_result(self):
+        results1 = self.res.await_result()
+        # results2 = self.second_res.await_result()
+        return results1 # , results2
+
+    def plot(self, Data, Data_0_label,  Data_1_label):
+        # while not self.s.curve_ready(): pass
         # self.ch1, self.ch2 = self.res.await_result()
         plt.clf()
         plt.plot(self.s.times * 1e3, Data[0], '.-', label=Data_0_label)
-        plt.plot(self.s.times * 1e3, Data[1], '.-', label=Data_1_label)
+        # plt.plot(self.s.times * 1e3, Data[1], '.-', label=Data_1_label)
         plt.legend()
         plt.xlabel("Time [ms]")
         plt.ylabel("Voltage")
@@ -70,3 +107,12 @@ class redpitaya:
     def movingaverage(self, interval, window_size):
         window = np.ones(int(window_size)) / float(window_size)
         return np.convolve(interval, window, 'same')
+
+    def full_aquisition (self, decimation=1.0, duration=0.00001):
+        self.acquire(decimation, duration)
+        res = self.get_result()
+        plt.plot(res[1])
+
+if __name__ == "__main__":
+    rp = RedPitaya()
+    rp.full_aquisition(decimation=1.0, duration=0.00001)
